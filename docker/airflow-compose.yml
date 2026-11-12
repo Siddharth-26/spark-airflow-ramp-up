@@ -1,0 +1,58 @@
+# Optional: the real Airflow web UI (webserver + scheduler + Postgres).
+# The course labs do NOT need this — they use `airflow dags test` in .venv-airflow.
+# Start:  docker compose -f docker/airflow-compose.yml up
+# UI:     http://localhost:8080   (admin / admin)
+# Stop:   docker compose -f docker/airflow-compose.yml down
+---
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.3
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-apache-spark
+  volumes:
+    - ../dags:/opt/airflow/dags
+    - ../app:/opt/airflow/app
+    - ../data:/opt/airflow/data
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - airflow db migrate && airflow users create --username admin --password admin --firstname a --lastname b --role Admin --email admin@example.com
+
+  webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
